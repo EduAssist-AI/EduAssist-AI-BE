@@ -1,0 +1,13 @@
+# Byte-code files
+*.pyc
+__pycache__/
+
+# Environment variables
+.env
+
+# ChromaDB persistence directory
+chroma_db/
+
+# Any other temporary or unwanted files
+*.log
+.DS_Store

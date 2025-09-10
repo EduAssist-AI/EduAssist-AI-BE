@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-dotenv
+pymongo
+motor
+passlib[bcrypt]
+python-jose[cryptography]
+email-validator
+chromadb[persistent]
+transformers
+torch
+pydantic-settings
