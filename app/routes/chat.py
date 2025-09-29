@@ -14,10 +14,10 @@ async def get_chat_history(
     """
     Retrieves the chat history for the current user.
     """
-    chat_history = await chat_history_collection.find_one({"userId": current_user.id})
+    chat_history = await chat_history_collection.find_one({"userId": current_user["id"]})
     if not chat_history:
         # If no chat history exists, create a new one
-        new_chat_history = ChatHistory(userId=current_user.id, messages=[])
+        new_chat_history = ChatHistory(userId=current_user["id"], messages=[])
         await chat_history_collection.insert_one(new_chat_history.dict(by_alias=True))
         chat_history = await chat_history_collection.find_one({"userId": current_user.id})
         if not chat_history:
@@ -61,14 +61,14 @@ async def post_chat_message(
     )
 
     # Update chat history
-    chat_history = await chat_history_collection.find_one({"userId": current_user.id})
+    chat_history = await chat_history_collection.find_one({"userId": current_user["id"]})
     if not chat_history:
         # This case should ideally be handled by get_chat_history creating it, but as a fallback
-        new_chat_history = ChatHistory(userId=current_user.id, messages=[message, llm_response])
+        new_chat_history = ChatHistory(userId=current_user["id"], messages=[message, llm_response])
         await chat_history_collection.insert_one(new_chat_history.dict(by_alias=True))
     else:
         await chat_history_collection.update_one(
-            {"userId": current_user.id},
+            {"userId": current_user["id"]},
             {"$push": {"messages": {"$each": [message.dict(), llm_response.dict()]}}}
         )
     
