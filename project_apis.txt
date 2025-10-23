@@ -1,0 +1,717 @@
+# EduAssist-AI Implementation Guide for Automation
+
+## Database Collections & Schemas
+
+### 1. **users** Collection
+```javascript
+{
+  _id: ObjectId,
+  email: String (unique, indexed),
+  password_hash: String (Bcrypt, cost factor: 12),
+  role: Enum ["FACULTY", "STUDENT"],
+  name: String (3-100 chars),
+  created_at: DateTime,
+  last_login: DateTime
+}
+```
+**Indexes:**
+- `email` (unique)
+- `role`
+
+---
+
+### 2. **course_rooms** Collection
+```javascript
+{
+  _id: ObjectId,
+  name: String (3-100 chars),
+  description: String (0-500 chars),
+  invitation_code: String (8 chars, unique, indexed),
+  created_by: ObjectId (reference to users),
+  status: Enum ["ACTIVE", "ARCHIVED"],
+  created_at: DateTime
+}
+```
+**Indexes:**
+- `invitation_code` (unique)
+- `(created_by, status)` (compound)
+
+---
+
+### 3. **enrollments** Collection
+```javascript
+{
+  _id: ObjectId,
+  user_id: ObjectId (reference to users),
+  course_id: ObjectId (reference to course_rooms),
+  joined_at: DateTime
+}
+```
+**Indexes:**
+- `(user_id, course_id)` (unique compound)
+- `course_id`
+
+---
+
+### 4. **videos** Collection
+```javascript
+{
+  _id: ObjectId,
+  course_id: ObjectId (reference to course_rooms),
+  title: String,
+  storage_url: String (Google Drive file ID),
+  status: Enum ["PENDING", "PROCESSING", "COMPLETE", "FAILED"],
+  published: Boolean,
+  duration_seconds: Integer,
+  uploaded_at: DateTime,
+  processed_at: DateTime
+}
+```
+**Indexes:**
+- `(course_id, published, status)` (compound)
+- `status`
+
+---
+
+### 5. **transcripts** Collection
+```javascript
+{
+  _id: ObjectId,
+  video_id: ObjectId (reference to videos, 1:1),
+  segments: Array [{
+    start: Float,
+    end: Float,
+    text: String
+  }],
+  word_count: Integer,
+  language: String (language code),
+  confidence: Float (average confidence score)
+}
+```
+**Indexes:**
+- `video_id` (unique)
+
+---
+
+### 6. **summaries** Collection
+```javascript
+{
+  _id: ObjectId,
+  video_id: ObjectId (reference to videos),
+  length_type: Enum ["BRIEF", "DETAILED", "COMPREHENSIVE"],
+  content: String (Markdown formatted),
+  word_count: Integer,
+  version: Integer,
+  is_published: Boolean,
+  created_at: DateTime
+}
+```
+**Indexes:**
+- `(video_id, is_published)` (compound)
+
+---
+
+### 7. **quizzes** Collection
+```javascript
+{
+  _id: ObjectId,
+  video_id: ObjectId (reference to videos),
+  title: String,
+  questions: Array [{
+    index: Integer,
+    type: Enum ["MCQ", "SHORT_ANSWER"],
+    question: String,
+    options: Array[String] (for MCQ only),
+    correctAnswer: String (index or text),
+    explanation: String,
+    difficulty: String,
+    timestamp: Integer (reference to video)
+  }],
+  is_published: Boolean,
+  version: Integer,
+  created_at: DateTime
+}
+```
+
+---
+
+### 8. **chat_history** Collection (from JSON)
+```javascript
+{
+  _id: ObjectId,
+  userId: String,
+  messages: Array [{
+    sender: String,
+    message: String,
+    timestamp: DateTime
+  }]
+}
+```
+
+---
+
+## REST API Endpoints
+
+### **Authentication APIs**
+
+#### 1. Register User
+```
+POST /api/v1/auth/register
+```
+**Request Body:**
+```json
+{
+  "email": "faculty@university.edu",
+  "password": "SecurePass123!",
+  "name": "Dr. Jane Smith",
+  "role": "FACULTY"
+}
+```
+**Response (201):**
+```json
+{
+  "userId": "507f1f77bcf86cd799439011",
+  "email": "faculty@university.edu",
+  "role": "FACULTY",
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+**Errors:**
+- 400: Invalid email format or password too weak
+- 409: Email already registered
+
+---
+
+#### 2. Login
+```
+POST /api/v1/auth/login
+```
+**Request Body:**
+```json
+{
+  "email": "faculty@university.edu",
+  "password": "SecurePass123!"
+}
+```
+**Response (200):**
+```json
+{
+  "userId": "507f1f77bcf86cd799439011",
+  "email": "faculty@university.edu",
+  "role": "FACULTY",
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "expiresAt": "2025-10-07T16:30:00Z"
+}
+```
+**Errors:**
+- 401: Invalid credentials
+- 429: Too many login attempts (rate limit: 5/min)
+
+---
+
+#### 3. Protected Route (Test)
+```
+GET /api/v1/auth/protected-route
+Headers: Authorization: Bearer <token>
+```
+
+---
+
+### **Course Management APIs**
+
+#### 4. Create Course
+```
+POST /api/v1/courses
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "name": "Neural Networks CS439",
+  "description": "Deep learning fundamentals"
+}
+```
+**Response (201):**
+```json
+{
+  "courseId": "507f1f77bcf86cd799439012",
+  "name": "Neural Networks CS439",
+  "description": "Deep learning fundamentals",
+  "invitationCode": "ABCD1234",
+  "invitationLink": "https://eduassist.ai/join/ABCD1234",
+  "createdAt": "2025-10-06T14:30:00Z",
+  "status": "ACTIVE"
+}
+```
+
+---
+
+#### 5. Join Course
+```
+POST /api/v1/courses/join
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "invitationCode": "ABCD1234"
+}
+```
+**Response (200):**
+```json
+{
+  "enrollmentId": "507f1f77bcf86cd799439013",
+  "courseId": "507f1f77bcf86cd799439012",
+  "courseName": "Neural Networks CS439",
+  "role": "STUDENT",
+  "joinedAt": "2025-10-06T15:00:00Z"
+}
+```
+**Errors:**
+- 404: Invalid invitation code
+- 409: Already enrolled in course
+- 403: Faculty users cannot join as students
+
+---
+
+#### 6. Get Course List
+```
+GET /api/v1/courses
+Headers: Authorization: Bearer <token>
+Query Parameters:
+  - status: ACTIVE | ARCHIVED (optional)
+  - page: integer (default: 1)
+  - limit: integer (default: 20, max: 100)
+```
+
+---
+
+### **Video Management APIs**
+
+#### 7. Upload Video
+```
+POST /api/v1/courses/{courseId}/videos
+Headers:
+  Authorization: Bearer <token>
+  Content-Type: multipart/form-data
+```
+**Form Data:**
+```
+file: <video file binary>
+title: "Lecture 1: Introduction to CNNs"
+```
+**Response (202):**
+```json
+{
+  "videoId": "507f1f77bcf86cd799439014",
+  "title": "Lecture 1: Introduction to CNNs",
+  "status": "PENDING",
+  "statusUrl": "/api/v1/videos/507f.../status",
+  "estimatedProcessingTime": 300
+}
+```
+**Errors:**
+- 413: File size exceeds 2GB limit
+- 415: Unsupported video format (only MP4, AVI, MOV)
+- 403: User is not course owner
+
+---
+
+#### 8. Get Video Processing Status
+```
+GET /api/v1/videos/{videoId}/status
+Headers: Authorization: Bearer <token>
+```
+**Response (200):**
+```json
+{
+  "videoId": "507f1f77bcf86cd799439014",
+  "status": "PROCESSING",
+  "progress": 45,
+  "currentStep": "Transcribing audio",
+  "estimatedTimeRemaining": 180,
+  "error": null
+}
+```
+
+---
+
+#### 9. Get Videos List
+```
+GET /api/v1/courses/{courseId}/videos
+Headers: Authorization: Bearer <token>
+Query Parameters:
+  - published: boolean (optional, default: true for students)
+  - status: PENDING | PROCESSING | COMPLETE | FAILED (optional)
+  - page: integer (default: 1)
+  - limit: integer (default: 20, max: 100)
+```
+**Response (200):**
+```json
+{
+  "videos": [
+    {
+      "videoId": "507f1f77bcf86cd799439014",
+      "title": "Lecture 1: Introduction to CNNs",
+      "durationSeconds": 3600,
+      "status": "COMPLETE",
+      "published": true,
+      "publishedAt": "2025-10-05T10:00:00Z",
+      "thumbnailUrl": "https://drive.google.com/...",
+      "hasTranscript": true,
+      "hasSummary": true,
+      "hasQuiz": true
+    }
+  ],
+  "pagination": {
+    "currentPage": 1,
+    "totalPages": 3,
+    "totalItems": 45,
+    "itemsPerPage": 20
+  }
+}
+```
+
+---
+
+### **AI Content Generation APIs**
+
+#### 10. AI Chat (Conversational Interface)
+```
+POST /api/v1/videos/{videoId}/chat
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "message": "Create a brief summary of this lecture",
+  "sessionId": "optional-session-id"
+}
+```
+**Response (200):**
+```json
+{
+  "response": "I've generated a brief summary focusing on...",
+  "intent": "GENERATE_SUMMARY",
+  "generatedContent": {
+    "contentType": "SUMMARY",
+    "contentId": "507f1f77bcf86cd799439015",
+    "preview": "This lecture introduces CNNs...",
+    "isPublished": false
+  },
+  "sessionId": "550e8400-e29b-41d4-a716",
+  "suggestions": [
+    "Make it more detailed",
+    "Generate quiz questions",
+    "Add key concepts"
+  ]
+}
+```
+
+---
+
+#### 11. Generate Summary
+```
+POST /api/v1/videos/{videoId}/summaries
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "lengthType": "DETAILED",
+  "focusAreas": ["backpropagation", "activation functions"]
+}
+```
+**Response (201):**
+```json
+{
+  "summaryId": "507f1f77bcf86cd799439016",
+  "videoId": "507f1f77bcf86cd799439014",
+  "lengthType": "DETAILED",
+  "content": "# Lecture Summary\n\n## Introduction...",
+  "wordCount": 450,
+  "version": 1,
+  "isPublished": false,
+  "createdAt": "2025-10-06T16:00:00Z"
+}
+```
+
+---
+
+#### 12. Publish Summary
+```
+PATCH /api/v1/summaries/{summaryId}/publish
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "isPublished": true
+}
+```
+**Response (200):**
+```json
+{
+  "summaryId": "507f1f77bcf86cd799439016",
+  "isPublished": true,
+  "publishedAt": "2025-10-06T16:15:00Z",
+  "version": 1
+}
+```
+
+---
+
+### **Quiz APIs**
+
+#### 13. Get Quiz List
+```
+GET /api/v1/videos/{videoId}/quizzes
+Headers: Authorization: Bearer <token>
+```
+**Response (200):**
+```json
+{
+  "quizzes": [
+    {
+      "quizId": "507f1f77bcf86cd799439017",
+      "title": "Lecture 1 Quiz",
+      "questionCount": 10,
+      "isPublished": true,
+      "version": 1,
+      "averageScore": 85.5,
+      "attemptCount": 23
+    }
+  ]
+}
+```
+
+---
+
+#### 14. Submit Quiz Attempt
+```
+POST /api/v1/quizzes/{quizId}/attempts
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "answers": [
+    {
+      "questionIndex": 0,
+      "answer": "2"
+    },
+    {
+      "questionIndex": 1,
+      "answer": "Backpropagation computes gradients..."
+    }
+  ]
+}
+```
+**Response (201):**
+```json
+{
+  "attemptId": "507f1f77bcf86cd799439018",
+  "score": 80,
+  "totalQuestions": 10,
+  "correctAnswers": 8,
+  "timeSpentSeconds": 420,
+  "feedback": [
+    {
+      "questionIndex": 0,
+      "isCorrect": true,
+      "explanation": "Correct! CNNs use..."
+    },
+    {
+      "questionIndex": 1,
+      "isCorrect": false,
+      "explanation": "Not quite. Backpropagation actually...",
+      "correctAnswer": "Backpropagation is an algorithm..."
+    }
+  ]
+}
+```
+
+---
+
+### **RAG (Retrieval-Augmented Generation) APIs**
+
+#### 15. Add Documents to RAG
+```
+POST /rag/add-documents
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "documents": [
+    "Document text 1",
+    "Document text 2"
+  ]
+}
+```
+
+---
+
+#### 16. Generate RAG Prompt
+```
+POST /rag/generate-prompt
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "query": "What are CNNs?",
+  "llm_prompt_template": "Based on the context: {context}\n\nAnswer: {query}",
+  "context_documents": ["doc1", "doc2"]
+}
+```
+**Response (200):**
+```json
+{
+  "rag_prompt": "Generated prompt with context..."
+}
+```
+
+---
+
+#### 17. Export RAG Embeddings
+```
+GET /rag/export-embeddings
+Headers: Authorization: Bearer <token>
+```
+**Response (200):**
+```json
+{
+  "message": "Embeddings exported successfully",
+  "file_path": "/path/to/embeddings.json"
+}
+```
+
+---
+
+### **Chat History APIs**
+
+#### 18. Get Chat History
+```
+GET /chat/history
+Headers: Authorization: Bearer <token>
+```
+**Response (200):**
+```json
+{
+  "userId": "507f1f77bcf86cd799439011",
+  "messages": [
+    {
+      "sender": "user",
+      "message": "Create a summary",
+      "timestamp": "2025-10-06T16:00:00Z"
+    },
+    {
+      "sender": "assistant",
+      "message": "Here's your summary...",
+      "timestamp": "2025-10-06T16:00:05Z"
+    }
+  ],
+  "_id": "507f1f77bcf86cd799439019"
+}
+```
+
+---
+
+#### 19. Post Chat Message
+```
+POST /chat/message
+Headers: Authorization: Bearer <token>
+```
+**Request Body:**
+```json
+{
+  "sender": "user",
+  "message": "Create a brief summary"
+}
+```
+**Response (200):**
+```json
+{
+  "sender": "assistant",
+  "message": "I've created a brief summary...",
+  "timestamp": "2025-10-06T16:05:00Z"
+}
+```
+
+---
+
+### **Health Check API**
+
+#### 20. Health Check
+```
+GET /health
+```
+**Response (200):**
+```json
+{
+  "status": "healthy"
+}
+```
+
+---
+
+## Implementation Status (Based on JSON File)
+
+### ✅ **Implemented APIs:**
+1. Auth Register (`/auth/register`)
+2. Auth Login (`/auth/login`)
+3. Protected Route (`/auth/protected-route`)
+4. Add Documents to RAG (`/rag/add-documents`)
+5. Generate RAG Prompt (`/rag/generate-prompt`)
+6. Export RAG Embeddings (`/rag/export-embeddings`)
+7. Get Chat History (`/chat/history`)
+8. Post Chat Message (`/chat/message`)
+9. Health Check (`/health`)
+
+### ❌ **Not Yet Implemented (Need to Build):**
+1. Course Management APIs (Create, Join, List)
+2. Video Upload & Processing APIs
+3. Video Status Tracking API
+4. AI Content Generation APIs (Summary, Quiz)
+5. Publish Content APIs
+6. Quiz Attempt Submission API
+
+---
+
+## Security Specifications
+
+### JWT Token Structure
+```json
+{
+  "sub": "507f1f77bcf86cd799439011",
+  "email": "faculty@university.edu",
+  "role": "FACULTY",
+  "iat": 1696608000,
+  "exp": 1696622400
+}
+```
+
+### Rate Limits
+| Endpoint Category | Rate Limit |
+|------------------|------------|
+| Authentication | 5 requests/min per IP |
+| Video Upload | 10 requests/hour per user |
+| AI Content Generation | 10 requests/min per user |
+| General API | 100 requests/min per user |
+
+
+---
+
+## Technology Stack
+
+- **Backend:** Python 3.11, FastAPI 0.104, Uvicorn 0.23
+- **Database:** MongoDB 7.0
+- **Cache/Queue:** Redis 7.2
+- **Task Queue:** Celery 5.3
+- **AI/ML:** HuggingFace API, Whisper v3, FLAN-T5, CLIP
+- **Storage:** Google Drive API v3
+
+---
+
+This comprehensive guide provides all the database schemas, API endpoints (both implemented and pending), and technical specifications needed for automation with Qwen or any other system.

@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.params import Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.rag.generator import load_rag_generator
-from app.routes import auth, rag, chat
+from app.routes import auth, rag, chat, courses, modules, videos, video_status, summaries, quizzes, ai_chat, module_chat
 from fastapi.middleware.cors import CORSMiddleware
 from app.utils.llm_generator import LLMGenerator
 from fastapi.openapi.utils import get_openapi
@@ -34,6 +34,14 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 app.include_router(rag.router, prefix="/rag", tags=["RAG"])
 app.include_router(chat.router, prefix="/chat", tags=["Chat History"])
+app.include_router(courses.router, prefix="/api/v1/courses", tags=["Course Management"])
+app.include_router(modules.router, prefix="/api/v1", tags=["Module Management"])
+app.include_router(videos.router, prefix="/api/v1", tags=["Video Management"])
+app.include_router(video_status.router, prefix="/api/v1", tags=["Video Status"])
+app.include_router(summaries.router, prefix="/api/v1", tags=["AI Content Generation"])
+app.include_router(quizzes.router, prefix="/api/v1", tags=["Quiz Management"])
+app.include_router(ai_chat.router, prefix="/api/v1", tags=["AI Chat"])
+app.include_router(module_chat.router, prefix="/api/v1", tags=["Module Chat"])
 
 @app.get("/health")
 async def health_check():
