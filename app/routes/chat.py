@@ -19,7 +19,7 @@ async def get_chat_history(
         # If no chat history exists, create a new one
         new_chat_history = ChatHistory(userId=current_user["id"], messages=[])
         await chat_history_collection.insert_one(new_chat_history.dict(by_alias=True))
-        chat_history = await chat_history_collection.find_one({"userId": current_user.id})
+        chat_history = await chat_history_collection.find_one({"userId": current_user["id"]})
         if not chat_history:
             raise HTTPException(status_code=500, detail="Failed to create chat history.")
 

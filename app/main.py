@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from http.client import HTTPException
 from fastapi import FastAPI
 from fastapi.params import Security
@@ -5,19 +6,21 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.rag.generator import load_rag_generator
 from app.routes import auth, rag, chat
 from fastapi.middleware.cors import CORSMiddleware
-from app.utils.llm_generator import LLMGenerator 
+from app.utils.llm_generator import LLMGenerator
 from fastapi.openapi.utils import get_openapi
 
 
-
-app = FastAPI()
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     print("Initializing LLM and RAG generator at startup...")
     app.state.generator = LLMGenerator()
     app.state.rag_generator = load_rag_generator()
     print("LLM and RAG generator loaded successfully.")
+    yield
+    print("Shutting down...")
+
+
+app = FastAPI(lifespan=lifespan)
 
 # CORS (for frontend)
 app.add_middleware(
