@@ -4,13 +4,14 @@ from app.db.mongo import db
 from bson import ObjectId
 from datetime import datetime
 from typing import List, Optional
+from app.utils.summary_generator import SummaryGenerator, SummaryRequest
 
 router = APIRouter()
 
 @router.post("/videos/{video_id}/summaries", status_code=status.HTTP_201_CREATED)
 async def generate_summary(
     video_id: str,
-    request_data: dict,
+    request_data: SummaryRequest,
     current_user=Depends(get_current_user)
 ):
     video = await db["videos"].find_one({"_id": ObjectId(video_id)})
@@ -28,9 +29,9 @@ async def generate_summary(
             detail="Video course not found."
         )
     
-    is_owner = str(course["created_by"]) == current_user["_id"]
+    is_owner = str(course["created_by"]) == current_user["id"]
     is_enrolled = await db["enrollments"].find_one({
-        "user_id": ObjectId(current_user["_id"]), 
+        "user_id": ObjectId(current_user["id"]), 
         "course_id": video["course_id"]
     }) is not None
     
@@ -41,41 +42,51 @@ async def generate_summary(
         )
     
     # Validate required fields
-    length_type = request_data.get('lengthType', 'BRIEF').upper()
+    length_type = request_data.length_type
     if length_type not in ['BRIEF', 'DETAILED', 'COMPREHENSIVE']:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid length type. Must be BRIEF, DETAILED, or COMPREHENSIVE."
         )
     
-    focus_areas = request_data.get('focusAreas', [])
+    # Get the transcript for this video to generate summary
+    transcript = await db["transcripts"].find_one({"video_id": ObjectId(video_id)})
+    if not transcript:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No transcript found for this video. Video must be processed first."
+        )
     
-    # Create a basic summary (in a real implementation, this would call an AI service)
-    summary_content = f"This is a {length_type.lower()} summary for video: {video['title']}."
-    if focus_areas:
-        summary_content += f" Focus areas: {', '.join(focus_areas)}."
+    # Convert transcript segments to the required format
+    from pydantic import BaseModel
+    class TranscriptSegment(BaseModel):
+        start: float
+        end: float
+        text: str
+
+    transcript_segments = [
+        TranscriptSegment(start=seg["start"], end=seg["end"], text=seg["text"])
+        for seg in transcript["segments"]
+    ]
     
-    summary_doc = {
-        "video_id": ObjectId(video_id),
-        "length_type": length_type,
-        "content": summary_content,
-        "word_count": len(summary_content.split()),
-        "version": 1,
-        "is_published": False,  # Faculty needs to publish
-        "created_at": datetime.utcnow()
-    }
-    
-    result = await db["summaries"].insert_one(summary_doc)
+    # Initialize summary generator and create summary
+    summary_generator = SummaryGenerator()
+    summary_response = await summary_generator.generate_and_store_summary(
+        video_id, 
+        transcript_segments, 
+        length_type, 
+        request_data.focus_areas
+    )
     
     return {
-        "summaryId": str(result.inserted_id),
-        "videoId": video_id,
-        "lengthType": length_type,
-        "content": summary_content,
-        "wordCount": len(summary_content.split()),
-        "version": 1,
-        "isPublished": False,
-        "createdAt": summary_doc["created_at"]
+        "summaryId": summary_response.summaryId,
+        "videoId": summary_response.videoId,
+        "lengthType": summary_response.lengthType,
+        "content": summary_response.content,
+        "wordCount": summary_response.wordCount,
+        "version": summary_response.version,
+        "isPublished": summary_response.isPublished,
+        "createdAt": datetime.utcnow()
     }
 
 @router.patch("/summaries/{summary_id}/publish", status_code=status.HTTP_200_OK)
@@ -104,7 +115,7 @@ async def publish_summary(summary_id: str, request_data: dict, current_user=Depe
     
     # Verify faculty is course owner
     course = await db["course_rooms"].find_one({"_id": video["course_id"]})
-    if not course or str(course["created_by"]) != current_user["_id"]:
+    if not course or str(course["created_by"]) != current_user["id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied."

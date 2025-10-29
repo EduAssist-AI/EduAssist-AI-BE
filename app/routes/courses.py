@@ -1,155 +1,221 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from app.utils.auth import get_current_user
 from app.db.mongo import db
-from app.schemas.course import CourseCreate, CourseCreateResponse, CourseJoinRequest, CourseJoinResponse, CourseListQuery, CourseListResponse
+from app.schemas.course import CourseCreate, CourseCreateResponse, CourseJoinRequest, CourseJoinResponse, CourseListResponse, CourseListQuery
+from app.schemas.user import UserOut
 from bson import ObjectId
 from datetime import datetime
-import secrets
-import string
+from typing import List, Dict, Any
 
 router = APIRouter()
 
-def generate_invitation_code():
-    """Generate a random 8-character invitation code"""
-    return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-
 @router.post("/", response_model=CourseCreateResponse, status_code=status.HTTP_201_CREATED)
-async def create_course(course_data: CourseCreate, current_user=Depends(get_current_user)):
-    # Only faculty can create courses
-    if current_user.get('role') != 'FACULTY':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only faculty members can create courses."
-        )
-    
-    name = course_data.name.strip()
-    description = course_data.description.strip()
-    
-    # Generate unique invitation code
-    invitation_code = generate_invitation_code()
-    while await db["course_rooms"].find_one({"invitation_code": invitation_code}):
-        invitation_code = generate_invitation_code()
-    
+async def create_course(course_data: CourseCreate, current_user: UserOut = Depends(get_current_user)):
+    # Create course document
     course_doc = {
-        "name": name,
-        "description": description,
-        "invitation_code": invitation_code,
-        "created_by": ObjectId(current_user["_id"]),
+        "name": course_data.name,
+        "description": course_data.description,
+        "created_by": ObjectId(current_user["id"]),
+        "created_at": datetime.utcnow(),
         "status": "ACTIVE",
-        "created_at": datetime.utcnow()
+        "invitation_code": f"{course_data.name[:3].upper()}{ObjectId()}"[:8],  # Generate unique code
+        "invitation_link": f"/join/{course_data.name[:3].upper()}{ObjectId()}"[:12]  # Generate unique link
     }
     
     result = await db["course_rooms"].insert_one(course_doc)
+    course_id = str(result.inserted_id)
+    
+    # Create invitation link
+    invitation_code = course_doc["invitation_code"]
+    invitation_link = f"http://localhost:8000/auth/join?code={invitation_code}"
+    
+    # Create default module for the course
+    default_module = {
+        "course_id": ObjectId(course_id),
+        "name": f"{course_data.name} - Module 1",
+        "description": f"Default module for {course_data.name}",
+        "created_at": datetime.utcnow(),
+        "status": "ACTIVE",
+        "created_by": ObjectId(current_user["id"])
+    }
+    
+    await db["modules"].insert_one(default_module)
+    
+    # Create enrollment for the creator
+    enrollment_doc = {
+        "user_id": ObjectId(current_user["id"]),
+        "course_id": ObjectId(course_id),
+        "role": "FACULTY",  # Creator becomes faculty
+        "enrolled_at": datetime.utcnow(),
+        "status": "ACTIVE"
+    }
+    await db["enrollments"].insert_one(enrollment_doc)
     
     return CourseCreateResponse(
-        courseId=str(result.inserted_id),
-        name=name,
-        description=description,
+        courseId=course_id,
+        name=course_doc["name"],
+        description=course_doc["description"],
         invitationCode=invitation_code,
-        invitationLink=f"https://eduassist.ai/join/{invitation_code}",
+        invitationLink=invitation_link,
         createdAt=course_doc["created_at"],
-        status="ACTIVE"
+        status=course_doc["status"]
     )
 
-@router.post("/join", response_model=CourseJoinResponse, status_code=status.HTTP_200_OK)
-async def join_course(request_data: CourseJoinRequest, current_user=Depends(get_current_user)):
-    # Faculty cannot join courses as students
-    if current_user.get('role') == 'FACULTY':
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Faculty users cannot join as students."
-        )
+@router.get("/", response_model=Dict[str, Any])
+async def list_courses(current_user: UserOut = Depends(get_current_user)):
+    # Get courses the user is enrolled in
+    enrollments = await db["enrollments"].find({"user_id": ObjectId(current_user["id"])}).to_list(length=None)
     
-    invitation_code = request_data.invitationCode
+    course_ids_from_enrollments = [enrollment["course_id"] for enrollment in enrollments]
     
-    # Find the course with the invitation code
-    course = await db["course_rooms"].find_one({"invitation_code": invitation_code})
+    # Get courses the user created (as faculty)
+    courses_created = await db["course_rooms"].find({"created_by": ObjectId(current_user["id"])}).to_list(length=100)
+    course_ids_created = [course["_id"] for course in courses_created]
+    
+    # Combine both lists and remove duplicates
+    all_course_ids = list(set(course_ids_from_enrollments + course_ids_created))
+    
+    # Get all unique courses
+    courses = await db["course_rooms"].find({"_id": {"$in": all_course_ids}}).to_list(length=100)
+    
+    # Format courses manually since CourseOut doesn't exist
+    course_list = []
+    for course in courses:
+        course_list.append({
+            "courseId": str(course["_id"]),
+            "name": course["name"],
+            "description": course["description"],
+            "invitationCode": course.get("invitation_code", ""),
+            "invitationLink": course.get("invitation_link", ""),
+            "createdAt": course["created_at"],
+            "status": course["status"]
+        })
+    
+    return {"courses": course_list, "pagination": {"total": len(course_list), "page": 1, "limit": 100}}
+
+@router.get("/{course_id}")
+async def get_course(course_id: str, current_user: UserOut = Depends(get_current_user)):
+    # Check if user is enrolled in the course
+    enrollment = await db["enrollments"].find_one({
+        "user_id": ObjectId(current_user["id"]),
+        "course_id": ObjectId(course_id)
+    })
+    
+    # Check if user is the course creator
+    course = await db["course_rooms"].find_one({"_id": ObjectId(course_id)})
     if not course:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid invitation code."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    
+    is_creator = str(course["created_by"]) == current_user["id"]
+    is_enrolled = enrollment is not None
+    
+    # Allow access if user is either enrolled or is the creator
+    if not (is_enrolled or is_creator):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enrolled in this course and not the course creator")
+    
+    return {
+        "courseId": str(course["_id"]),
+        "name": course["name"],
+        "description": course["description"],
+        "invitationCode": course.get("invitation_code", ""),
+        "invitationLink": course.get("invitation_link", ""),
+        "createdAt": course["created_at"],
+        "status": course["status"]
+    }
+
+@router.put("/{course_id}")
+async def update_course(course_id: str, course_data: CourseCreate, current_user: UserOut = Depends(get_current_user)):
+    # Verify user is the course creator (faculty)
+    course = await db["course_rooms"].find_one({"_id": ObjectId(course_id)})
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    
+    if str(course["created_by"]) != current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only course creator can update course")
+    
+    # Update course
+    update_data = {
+        "$set": {
+            "name": course_data.name,
+            "description": course_data.description,
+            "updated_at": datetime.utcnow()
+        }
+    }
+    
+    result = await db["course_rooms"].update_one({"_id": ObjectId(course_id)}, update_data)
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No changes made to course")
+    
+    return {"message": "Course updated successfully", "course_id": course_id}
+
+@router.delete("/{course_id}")
+async def delete_course(course_id: str, current_user: UserOut = Depends(get_current_user)):
+    # Verify user is the course creator (faculty)
+    course = await db["course_rooms"].find_one({"_id": ObjectId(course_id)})
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    
+    if str(course["created_by"]) != current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only course creator can delete course")
+    
+    # Check if there are enrolled students other than the creator
+    enrollments = await db["enrollments"].find({"course_id": ObjectId(course_id)}).to_list(length=None)
+    other_enrollments = [e for e in enrollments if str(e["user_id"]) != current_user["id"]]
+    
+    if other_enrollments:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, 
+                          detail="Cannot delete course with enrolled students. Unenroll them first.")
+    
+    # Delete course and related data
+    await db["course_rooms"].delete_one({"_id": ObjectId(course_id)})
+    await db["modules"].delete_many({"course_id": ObjectId(course_id)})  # Delete all modules
+    await db["enrollments"].delete_many({"course_id": ObjectId(course_id)})  # Delete all enrollments
+    await db["videos"].delete_many({"course_id": ObjectId(course_id)})  # Delete all videos
+    
+    # Also delete transcripts for videos in this course (get video IDs first)
+    video_docs = await db["videos"].find({"course_id": ObjectId(course_id)}).to_list(length=None)
+    video_ids = [v["_id"] for v in video_docs]
+    if video_ids:
+        await db["transcripts"].delete_many({"video_id": {"$in": video_ids}})
+    
+    # In a real implementation, you'd also need to handle:
+    # - Deleting related content like summaries, quizzes, etc.
+    # - Removing any files stored locally
+    
+    return {"message": "Course and all related data deleted successfully", "course_id": course_id}
+
+@router.post("/{course_id}/join", response_model=CourseJoinResponse)
+async def join_course(course_id: str, join_request: CourseJoinRequest, current_user: UserOut = Depends(get_current_user)):
+    # Verify course exists and invitation code is valid
+    course = await db["course_rooms"].find_one({"_id": ObjectId(course_id)})
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     
     # Check if user is already enrolled
     existing_enrollment = await db["enrollments"].find_one({
-        "user_id": ObjectId(current_user["_id"]),
-        "course_id": course["_id"]
+        "user_id": ObjectId(current_user["id"]),
+        "course_id": ObjectId(course_id)
     })
-    if existing_enrollment:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Already enrolled in course."
-        )
     
-    # Create enrollment
+    if existing_enrollment:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Already enrolled in this course")
+    
+    # Create enrollment for the user
     enrollment_doc = {
-        "user_id": ObjectId(current_user["_id"]),
-        "course_id": course["_id"],
-        "joined_at": datetime.utcnow()
+        "user_id": ObjectId(current_user["id"]),
+        "course_id": ObjectId(course_id),
+        "role": "STUDENT",
+        "enrolled_at": datetime.utcnow(),
+        "status": "ACTIVE"
     }
     
     result = await db["enrollments"].insert_one(enrollment_doc)
     
     return CourseJoinResponse(
         enrollmentId=str(result.inserted_id),
-        courseId=str(course["_id"]),
+        courseId=course_id,
         courseName=course["name"],
-        role="STUDENT",  # Students join as students
-        joinedAt=enrollment_doc["joined_at"]
-    )
-
-@router.get("/", response_model=CourseListResponse, status_code=status.HTTP_200_OK)
-async def get_course_list(
-    status_filter: str = None,
-    page: int = 1,
-    limit: int = 20,
-    current_user=Depends(get_current_user)
-):
-    # Validate pagination parameters
-    if page < 1:
-        page = 1
-    if limit < 1 or limit > 100:
-        limit = 20
-    
-    # Faculty can view courses they created; students can view enrolled courses
-    query = {}
-    if current_user.get('role') == 'FACULTY':
-        # Faculty sees courses they created
-        query = {"created_by": ObjectId(current_user["_id"])}
-        if status_filter:
-            query["status"] = status_filter
-    else:
-        # Students see courses they're enrolled in
-        enrolled_courses = await db["enrollments"].find({
-            "user_id": ObjectId(current_user["_id"])
-        })
-        course_ids = [enrollment["course_id"] async for enrollment in enrolled_courses]
-        query = {"_id": {"$in": course_ids}}
-        if status_filter:
-            query["status"] = status_filter
-    
-    # Get total count for pagination
-    total_count = await db["course_rooms"].count_documents(query)
-    
-    # Get paginated results
-    courses = []
-    async for course in db["course_rooms"].find(query).skip((page - 1) * limit).limit(limit):
-        course_data = {
-            "id": str(course["_id"]),
-            "name": course["name"],
-            "description": course["description"],
-            "status": course["status"],
-            "createdAt": course["created_at"],
-            "createdBy": str(course["created_by"])
-        }
-        courses.append(course_data)
-    
-    return CourseListResponse(
-        courses=courses,
-        pagination={
-            "currentPage": page,
-            "totalPages": (total_count + limit - 1) // limit if limit > 0 else 1,
-            "totalItems": total_count,
-            "itemsPerPage": limit
-        }
+        role="STUDENT",
+        joinedAt=enrollment_doc["enrolled_at"]
     )
