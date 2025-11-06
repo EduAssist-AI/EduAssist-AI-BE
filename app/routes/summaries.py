@@ -58,12 +58,7 @@ async def generate_summary(
         )
     
     # Convert transcript segments to the required format
-    from pydantic import BaseModel
-    class TranscriptSegment(BaseModel):
-        start: float
-        end: float
-        text: str
-
+    from app.utils.audio_processor import TranscriptSegment
     transcript_segments = [
         TranscriptSegment(start=seg["start"], end=seg["end"], text=seg["text"])
         for seg in transcript["segments"]

@@ -16,6 +16,7 @@ warnings.filterwarnings("ignore", message=".*datetime.datetime.utcnow.*")
 test_email = "prit@gmail.com"
 test_password = "12345"
 test_username = "prit"
+test_role = "FACULTY"
 
 @pytest.fixture(scope="module")
 def client():
@@ -29,6 +30,7 @@ def mock_db():
         # Mock for bracket notation access (db["users"]...)
         mock_auth_db["users"].find_one = AsyncMock(return_value=None)
         mock_auth_db["users"].insert_one = AsyncMock(return_value=type('obj', (object,), {'inserted_id' : 'some_id'}))
+        mock_auth_db["users"].update_one = AsyncMock(return_value=type('obj', (object,), {'modified_count': 1}))
         mock_utils_db["users"].find_one = AsyncMock(return_value=None)
         
         # Mock for dot notation access (db.users...)
@@ -40,7 +42,7 @@ def mock_db():
 @pytest.mark.asyncio
 async def test_login_user(client: TestClient, mock_db):
     hashed_pw = hash_password(test_password)
-    user_doc = {"_id": ObjectId("652a1a9a0a8e7c1b7c8e7c1b"), "email": test_email, "username": test_username, "password": hashed_pw}
+    user_doc = {"_id": ObjectId("652a1a9a0a8e7c1b7c8e7c1b"), "email": test_email, "username": test_username, "password": hashed_pw, "role": test_role}
     mock_db["auth_db"]["users"].find_one.return_value = user_doc
     
     with patch('app.routes.auth.verify_password', return_value=True), \
@@ -66,13 +68,13 @@ async def test_login_user(client: TestClient, mock_db):
 @pytest.mark.asyncio
 async def test_protected_route(client: TestClient, mock_db):
     hashed_pw = hash_password(test_password)
-    user_doc = {"_id": ObjectId("652a1a9a0a8e7c1b7c8e7c1b"), "email": test_email, "username": test_username, "password": hashed_pw}
+    user_doc = {"_id": ObjectId("652a1a9a0a8e7c1b7c8e7c1b"), "email": test_email, "username": test_username, "password": hashed_pw, "role": test_role}
     
     # Mock for login step - find user by email
     mock_db["auth_db"]["users"].find_one.return_value = user_doc
     
     # Create a proper token with the user info encoded
-    proper_token = create_access_token({"sub": str(user_doc["_id"]), "username": test_username})
+    proper_token = create_access_token({"sub": str(user_doc["_id"]), "username": test_username, "role": test_role})
     
     with patch('app.routes.auth.verify_password', return_value=True), \
          patch('app.routes.auth.create_access_token', return_value=proper_token):
@@ -94,17 +96,18 @@ async def test_protected_route(client: TestClient, mock_db):
 
 @pytest.mark.asyncio
 async def test_register_user(client: TestClient, mock_db):
-    user_data = {"email": test_email, "username": test_username, "password": test_password}
+    user_data = {"email": test_email, "name": test_username, "password": test_password, "role": test_role}  # Changed from "username" to "name" due to alias
     mock_db["auth_db"]["users"].find_one.return_value = None # Ensure user doesn't exist for registration
     mock_db["auth_db"]["users"].insert_one.return_value = type('obj', (object,), {'inserted_id' : 'some_id'})
     response = client.post("/auth/register", json=user_data)
-    assert response.status_code == 200
-    assert "user_id" in response.json()
-    assert response.json()["message"] == "User registered"
+    assert response.status_code == 201  # Changed from 200 to 201 as per the route definition
+    assert "userId" in response.json()  # Changed from user_id to userId as per the actual response
+    assert "token" in response.json()  # Check for token in response
     mock_db["auth_db"]["users"].insert_one.assert_called_once()
 
     # Test registering with the same email again
+    user_data_same_email = {"email": test_email, "name": test_username, "password": test_password, "role": test_role}  # Changed from "username" to "name" due to alias
     mock_db["auth_db"]["users"].find_one.return_value = {"email": test_email} # Simulate existing user
-    response = client.post("/auth/register", json=user_data)
+    response = client.post("/auth/register", json=user_data_same_email)
     assert response.status_code == 400
     assert response.json()["detail"] == "Email already registered."
