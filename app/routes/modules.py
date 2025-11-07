@@ -45,13 +45,24 @@ async def create_module(course_id: str, module_data: ModuleCreate, current_user:
 
 @router.get("/courses/{course_id}/modules")
 async def list_modules(course_id: str, current_user: UserOut = Depends(get_current_user)):
-    # Verify user is enrolled in the course
-    enrollment = await db["enrollments"].find_one({
-        "user_id": ObjectId(current_user["id"]),
-        "course_id": ObjectId(course_id)
-    })
+    # Check if user is enrolled or is the course creator (faculty)
+    course = await db["course_rooms"].find_one({"_id": ObjectId(course_id)})
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     
-    if not enrollment:
+    # Allow access if user is course creator (faculty) or enrolled student
+    is_course_creator = str(course["created_by"]) == current_user["id"]
+    is_enrolled = False
+    
+    if not is_course_creator:
+        # Only check enrollment if user is not the course creator
+        enrollment = await db["enrollments"].find_one({
+            "user_id": ObjectId(current_user["id"]),
+            "course_id": ObjectId(course_id)
+        })
+        is_enrolled = bool(enrollment)
+    
+    if not is_course_creator and not is_enrolled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enrolled in this course")
     
     modules = await db["modules"].find({"course_id": ObjectId(course_id)}).to_list(length=100)
@@ -76,13 +87,24 @@ async def get_module(module_id: str, current_user: UserOut = Depends(get_current
     if not module:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
     
-    # Verify user is enrolled in the course
-    enrollment = await db["enrollments"].find_one({
-        "user_id": ObjectId(current_user["id"]),
-        "course_id": module["course_id"]
-    })
+    # Check if user is enrolled or is the course creator (faculty)
+    course = await db["course_rooms"].find_one({"_id": module["course_id"]})
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     
-    if not enrollment:
+    # Allow access if user is course creator (faculty) or enrolled student
+    is_course_creator = str(course["created_by"]) == current_user["id"]
+    is_enrolled = False
+    
+    if not is_course_creator:
+        # Only check enrollment if user is not the course creator
+        enrollment = await db["enrollments"].find_one({
+            "user_id": ObjectId(current_user["id"]),
+            "course_id": module["course_id"]
+        })
+        is_enrolled = bool(enrollment)
+    
+    if not is_course_creator and not is_enrolled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enrolled in this course")
     
     return {

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from typing import Literal, Optional, List, Dict, Any
 from datetime import datetime
 
 class ModuleCreate(BaseModel):
@@ -16,3 +16,18 @@ class ModuleResponse(BaseModel):
 
 class ModuleListResponse(BaseModel):
     modules: list
+
+class ModuleChatRequest(BaseModel):
+    llm_prompt_template: str
+    message: str
+
+
+class ModuleChatResponse(BaseModel):
+    response: str
+    moduleId: str
+    query: str
+    context_used: bool
+
+class ModuleChatHistoryResponse(BaseModel):
+    moduleId: str
+    chatHistory: List[Dict[str, Any]]

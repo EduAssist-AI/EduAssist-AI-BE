@@ -1,14 +1,21 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from app.utils.auth import get_current_user
 from app.db.mongo import db
 from app.rag.generator import load_rag_generator
 from bson import ObjectId
 from datetime import datetime
+from app.schemas.user import UserOut
+from app.schemas.modules import ModuleChatRequest, ModuleChatResponse, ModuleChatHistoryResponse
 
 router = APIRouter()
 
-@router.post("/modules/{module_id}/chat", status_code=status.HTTP_200_OK)
-async def module_specific_chat(module_id: str, request_data: dict, current_user=Depends(get_current_user)):
+@router.post("/modules/{module_id}/chat", response_model=ModuleChatResponse, status_code=status.HTTP_200_OK)
+async def module_specific_chat(
+    request: Request,  # Add request parameter to access app.state
+    module_id: str, 
+    request_data: ModuleChatRequest, 
+    current_user: UserOut = Depends(get_current_user)
+):
     # Check if module exists
     module = await db["modules"].find_one({"_id": ObjectId(module_id)})
     if not module:
@@ -25,9 +32,9 @@ async def module_specific_chat(module_id: str, request_data: dict, current_user=
             detail="Module course not found."
         )
     
-    is_owner = str(course["created_by"]) == current_user["_id"]
+    is_owner = str(course["created_by"]) == current_user["id"]
     is_enrolled = await db["enrollments"].find_one({
-        "user_id": ObjectId(current_user["_id"]), 
+        "user_id": ObjectId(current_user["id"]), 
         "course_id": module["course_id"]
     }) is not None
     
@@ -37,42 +44,56 @@ async def module_specific_chat(module_id: str, request_data: dict, current_user=
             detail="Access denied."
         )
     
-    query = request_data.get("message", "")
+    query = request_data.message
     if not query:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Message is required."
         )
     
-    # Retrieve module-specific content for RAG context
-    # Get all videos, slides, and their summaries associated with this module
-    videos = []
-    async for video in db["videos"].find({"module_id": ObjectId(module_id), "published": True}):
-        # Get associated summary if available
-        summary = await db["summaries"].find_one({"video_id": video["_id"], "is_published": True})
+    # Use the application's actual RAG generator and LLM generator
+    try:
+        rag_generator = request.app.state.rag_generator
+        llm_generator = request.app.state.generator
         
-        video_context = f"Video: {video['title']}"
-        if summary:
-            video_context += f"\nSummary: {summary['content']}"
+        # Search for relevant content specifically from this module's videos
+        relevant_chunks = rag_generator.search_video_content(query, video_id=None, top_k=5)
         
-        videos.append(video_context)
-    
-    # Create a RAG context from module materials
-    module_context = f"Module: {module['name']}\nDescription: {module['description']}\n\n"
-    module_context += "Materials:\n" + "\n".join(videos)
-    
-    # Use the application's RAG generator (accessed via app.state in the main app)
-    # For now, we'll simulate the RAG response
-    rag_prompt = f"Based on the following module content:\n\n{module_context}\n\nQuestion: {query}\n\nAnswer:"
-    
-    # In a real implementation, we would use app.state.rag_generator
-    # For now, returning a simulated response
-    response = f"Based on module '{module['name']}', here is information related to your query about '{query}'. This would be generated using RAG context from the module materials."
+        # Filter to only include chunks from videos in this specific module
+        module_video_ids = []
+        async for video in db["videos"].find({"module_id": ObjectId(module_id)}):
+            module_video_ids.append(str(video["_id"]))
+        
+        # Filter results by module's video IDs
+        filtered_chunks = []
+        for chunk_result in relevant_chunks:
+            metadata = chunk_result.get("metadata", {})
+            video_id = metadata.get("video_id")
+            if video_id and video_id in module_video_ids:
+                filtered_chunks.append(chunk_result["content"])
+        
+        # Define a simple LLM prompt template for educational content
+        llm_prompt_template = "Context: {context}\n\nQuestion: {query}\n\nAnswer:"
+        
+        if filtered_chunks:
+            # Use RAG to get relevant content from module videos
+            context = "\n".join(filtered_chunks)
+            rag_prompt = llm_prompt_template.format(context=context, query=query)
+            response = llm_generator.generate_response(rag_prompt)
+        else:
+            # Fallback: use general module information
+            module_context = f"Module: {module['name']}\nDescription: {module['description']}"
+            rag_prompt = llm_prompt_template.format(context=module_context, query=query)
+            response = llm_generator.generate_response(rag_prompt)
+        
+    except Exception as e:
+        # If RAG/LLM fails, return a meaningful response
+        response = f"Based on module '{module['name']}', here is information related to your query about '{query}'. [Note: AI processing failed - {str(e)}]"
     
     # Save the chat to module-specific chat history
     chat_entry = {
         "module_id": ObjectId(module_id),
-        "user_id": ObjectId(current_user["_id"]),
+        "user_id": ObjectId(current_user["id"]),
         "role": current_user["role"],
         "query": query,
         "response": response,
@@ -81,15 +102,19 @@ async def module_specific_chat(module_id: str, request_data: dict, current_user=
     
     await db["module_chats"].insert_one(chat_entry)
     
-    return {
-        "response": response,
-        "moduleId": module_id,
-        "query": query,
-        "context_used": len(videos) > 0
-    }
+    return ModuleChatResponse(
+        response=response,
+        moduleId=module_id,
+        query=query,
+        context_used=len(filtered_chunks) > 0
+    )
 
-@router.get("/modules/{module_id}/chat/history", status_code=status.HTTP_200_OK)
-async def get_module_chat_history(module_id: str, current_user=Depends(get_current_user)):
+@router.get("/modules/{module_id}/chat/history", response_model=ModuleChatHistoryResponse, status_code=status.HTTP_200_OK)
+async def get_module_chat_history(
+    request: Request,  # Add request parameter to maintain consistency
+    module_id: str, 
+    current_user: UserOut = Depends(get_current_user)
+):
     # Check if module exists
     module = await db["modules"].find_one({"_id": ObjectId(module_id)})
     if not module:
@@ -106,9 +131,9 @@ async def get_module_chat_history(module_id: str, current_user=Depends(get_curre
             detail="Module course not found."
         )
     
-    is_owner = str(course["created_by"]) == current_user["_id"]
+    is_owner = str(course["created_by"]) == current_user["id"]
     is_enrolled = await db["enrollments"].find_one({
-        "user_id": ObjectId(current_user["_id"]), 
+        "user_id": ObjectId(current_user["id"]), 
         "course_id": module["course_id"]
     }) is not None
     
@@ -134,7 +159,7 @@ async def get_module_chat_history(module_id: str, current_user=Depends(get_curre
     # Reverse to show oldest first
     chat_history.reverse()
     
-    return {
-        "moduleId": module_id,
-        "chatHistory": chat_history
-    }
+    return ModuleChatHistoryResponse(
+        moduleId=module_id,
+        chatHistory=chat_history
+    )
