@@ -5,7 +5,7 @@ from app.rag.generator import load_rag_generator
 from bson import ObjectId
 from datetime import datetime
 from app.schemas.user import UserOut
-from app.schemas.modules import ModuleChatRequest, ModuleChatResponse, ModuleChatHistoryResponse
+from app.schemas.modules import ModuleChatRequest, ModuleChatResponse, ModuleChatHistoryResponse, AllModulesChatHistoryResponse
 
 router = APIRouter()
 
@@ -162,4 +162,130 @@ async def get_module_chat_history(
     return ModuleChatHistoryResponse(
         moduleId=module_id,
         chatHistory=chat_history
+    )
+
+@router.get("/modules/chat/history", response_model=AllModulesChatHistoryResponse, status_code=status.HTTP_200_OK)
+async def get_all_modules_chat_history(
+    request: Request,
+    current_user: UserOut = Depends(get_current_user)
+):
+    """
+    Get chat history from all modules the user has access to.
+    This includes modules from courses where the user is either the owner or enrolled.
+    """
+    # Find all courses where user is owner or enrolled
+    user_id = ObjectId(current_user["id"])
+    
+    # Find courses where user is the owner
+    owned_courses = []
+    async for course in db["course_rooms"].find({"created_by": user_id}):
+        owned_courses.append(course["_id"])
+    
+    # Find courses where user is enrolled
+    enrolled_course_ids = []
+    async for enrollment in db["enrollments"].find({"user_id": user_id}):
+        enrolled_course_ids.append(enrollment["course_id"])
+    
+    # Combine all course IDs the user has access to
+    accessible_course_ids = list(set(owned_courses + enrolled_course_ids))
+    
+    if not accessible_course_ids:
+        return AllModulesChatHistoryResponse(allModulesChatHistory=[])
+    
+    # Find all modules in these courses
+    module_ids = []
+    async for module in db["modules"].find({"course_id": {"$in": accessible_course_ids}}):
+        module_ids.append(module["_id"])
+    
+    if not module_ids:
+        return AllModulesChatHistoryResponse(allModulesChatHistory=[])
+    
+    # Get chat history for all accessible modules
+    all_chat_history = []
+    
+    # Get all chat entries for these modules, sorted by timestamp
+    async for chat in db["module_chats"].find({
+        "module_id": {"$in": module_ids},
+        "user_id": user_id  # Only get chats from the current user
+    }).sort("timestamp", -1):
+        # Get module information to include in the response
+        module = await db["modules"].find_one({"_id": chat["module_id"]})
+        
+        chat_entry = {
+            "moduleId": str(chat["module_id"]),
+            "moduleName": module["name"] if module else "Unknown Module",
+            "query": chat["query"],
+            "response": chat["response"],
+            "role": chat["role"],
+            "timestamp": chat["timestamp"]
+        }
+        all_chat_history.append(chat_entry)
+    
+    return AllModulesChatHistoryResponse(
+        allModulesChatHistory=all_chat_history
+    )
+
+@router.get("/courses/{course_id}/modules/chat/history", response_model=AllModulesChatHistoryResponse, status_code=status.HTTP_200_OK)
+async def get_course_modules_chat_history(
+    request: Request,
+    course_id: str,
+    current_user: UserOut = Depends(get_current_user)
+):
+    """
+    Get chat history from all modules in a specific course.
+    Only accessible to course owners or enrolled students.
+    """
+    course_object_id = ObjectId(course_id)
+    
+    # Check if course exists
+    course = await db["course_rooms"].find_one({"_id": course_object_id})
+    if not course:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Course not found."
+        )
+    
+    # Check if user has access to the course
+    is_owner = str(course["created_by"]) == current_user["id"]
+    is_enrolled = await db["enrollments"].find_one({
+        "user_id": ObjectId(current_user["id"]), 
+        "course_id": course_object_id
+    }) is not None
+    
+    if not (is_owner or is_enrolled):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied."
+        )
+    
+    # Find all modules in this course
+    module_ids = []
+    async for module in db["modules"].find({"course_id": course_object_id}):
+        module_ids.append(module["_id"])
+    
+    if not module_ids:
+        return AllModulesChatHistoryResponse(allModulesChatHistory=[])
+    
+    # Get chat history for all modules in this course
+    course_chat_history = []
+    
+    # Get all chat entries for these modules, sorted by timestamp
+    async for chat in db["module_chats"].find({
+        "module_id": {"$in": module_ids}
+    }).sort("timestamp", -1):
+        # Get module information to include in the response
+        module = await db["modules"].find_one({"_id": chat["module_id"]})
+        
+        chat_entry = {
+            "moduleId": str(chat["module_id"]),
+            "moduleName": module["name"] if module else "Unknown Module",
+            "query": chat["query"],
+            "response": chat["response"],
+            "role": chat["role"],
+            "timestamp": chat["timestamp"]
+        }
+        course_chat_history.append(chat_entry)
+    
+    return AllModulesChatHistoryResponse(
+        allModulesChatHistory=course_chat_history
     )
