@@ -1,13 +1,13 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class AddDocumentsRequest(BaseModel):
-    documents: List[str]
+    documents: List[str] = Field(..., min_items=1)
 
 class GenerateRagPromptRequest(BaseModel):
-    query: str
-    llm_prompt_template: str
-    context_documents: Optional[List[str]] = None # Optional, if you want to add new documents on the fly
+    query: str = Field(..., min_length=1)
+    llm_prompt_template: str = Field(..., min_length=1)
+    context_documents: Optional[List[str]] = Field(default_factory=list)  # Optional, if you want to add new documents on the fly
 
 class GenerateRagPromptResponse(BaseModel):
     rag_prompt: str

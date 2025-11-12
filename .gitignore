@@ -2,6 +2,8 @@
 *.pyc
 __pycache__/
 
+uploads/
+
 # Environment variables
 .env
 
@@ -11,3 +13,5 @@ chroma_db/
 # Any other temporary or unwanted files
 *.log
 .DS_Store
+
+venv/

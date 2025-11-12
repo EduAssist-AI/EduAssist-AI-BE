@@ -3,7 +3,7 @@ from typing import List, Optional
 from datetime import datetime
 
 class ChatMessage(BaseModel):
-    sender: str # e.g., "user", "llm"
+    sender: str  # e.g., "user", "llm", "assistant"
     message: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 

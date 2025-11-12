@@ -15,9 +15,16 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
+    # Truncate password to 72 bytes to avoid bcrypt limitation
+    # This is a workaround for bcrypt's 72-byte password length limit
+    if len(password.encode('utf-8')) > 72:
+        password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     return pwd_context.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # Truncate password to 72 bytes for verification as well
+    if len(plain_password.encode('utf-8')) > 72:
+        plain_password = plain_password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     return pwd_context.verify(plain_password, hashed_password)
 
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(hours=24)):
@@ -42,6 +49,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=['HS256'])
         user_id: str = payload.get("sub")
+        username: str = payload.get("username")
+        role: str = payload.get("role")
+        
         if user_id is None:
             raise credentials_exception
     except JWTError:
@@ -50,6 +60,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     user = await db.users.find_one({"_id": ObjectId(user_id)})
     if user is None:
         raise credentials_exception
+        
+    # Ensure role is included in the returned user object
     user['id'] = str(user['_id'])
+    # Only include role if it exists in the user document
+    if 'role' not in user and role:
+        user['role'] = role
+    elif 'role' not in user:
+        user['role'] = "STUDENT"  # default role
+        
     return user
 
