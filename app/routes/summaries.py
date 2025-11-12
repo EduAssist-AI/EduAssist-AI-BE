@@ -5,6 +5,7 @@ from bson import ObjectId
 from datetime import datetime
 from typing import List, Optional
 from app.utils.summary_generator import SummaryGenerator, SummaryRequest
+from app.rag.generator import TranscriptSegment
 
 router = APIRouter()
 
@@ -58,7 +59,6 @@ async def generate_summary(
         )
     
     # Convert transcript segments to the required format
-    from app.utils.audio_processor import TranscriptSegment
     transcript_segments = [
         TranscriptSegment(start=seg["start"], end=seg["end"], text=seg["text"])
         for seg in transcript["segments"]
