@@ -64,28 +64,29 @@ class ModuleOut(BaseModel):
     createdAt: datetime
     status: str
 
-# Video Schemas
-class VideoUploadResponse(BaseModel):
-    videoId: str
+# Resource Schemas
+class ResourceUploadResponse(BaseModel):
+    resourceId: str
     moduleId: str
     title: str
+    type: str
     status: str
     statusUrl: str
     estimatedProcessingTime: int
 
-class VideoStatusResponse(BaseModel):
-    videoId: str
+class ResourceStatusResponse(BaseModel):
+    resourceId: str
     status: str
     progress: int
     currentStep: str
     estimatedTimeRemaining: int
     error: Optional[str]
 
-class VideoListResponse(BaseModel):
-    videos: List[dict]
+class ResourceListResponse(BaseModel):
+    resources: List[dict]
     pagination: dict
 
-# Summary Schemas  
+# Summary Schemas
 class SummaryCreate(BaseModel):
     lengthType: Literal["BRIEF", "DETAILED", "COMPREHENSIVE"]
     focusAreas: Optional[List[str]] = []
@@ -174,7 +175,7 @@ class ChatMessage(BaseModel):
 class ChatHistory(BaseModel):
     userId: str
     messages: List[ChatMessage] = []
-    
+
 class ChatHistoryOut(ChatHistory):
     id: str = Field(..., alias="_id")
 

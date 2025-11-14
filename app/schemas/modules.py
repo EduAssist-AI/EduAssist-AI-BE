@@ -31,3 +31,6 @@ class ModuleChatResponse(BaseModel):
 class ModuleChatHistoryResponse(BaseModel):
     moduleId: str
     chatHistory: List[Dict[str, Any]]
+
+class AllModulesChatHistoryResponse(BaseModel):
+    allModulesChatHistory: List[Dict[str, Any]]
