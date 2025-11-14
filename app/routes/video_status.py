@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from app.utils.auth import get_current_user
 from app.db.mongo import db
-from app.schemas.video import VideoUploadResponse # Reusing for status response
 from bson import ObjectId
 from pydantic import BaseModel
 from typing import Optional
