@@ -4,8 +4,9 @@ from fastapi import FastAPI
 from fastapi.params import Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.rag.generator import load_rag_generator
-from app.routes import auth, rag, chat, courses, modules, videos, video_status, summaries, quizzes, ai_chat, module_chat
+from app.routes import auth, rag, chat, courses, modules, videos, video_status, summaries, quizzes, ai_chat, module_chat, resources
 from app.routes.video_processing import router as video_processing_router
+from app.routes.document_processing import router as document_processing_router
 from fastapi.middleware.cors import CORSMiddleware
 from app.utils.llm_generator import LLMGenerator
 from fastapi.openapi.utils import get_openapi
@@ -44,6 +45,8 @@ app.include_router(quizzes.router, prefix="/api/v1", tags=["Quiz Management"])
 app.include_router(ai_chat.router, prefix="/api/v1", tags=["AI Chat"])
 app.include_router(module_chat.router, prefix="/api/v1", tags=["Module Chat"])
 app.include_router(video_processing_router, prefix="/api/v1", tags=["Video Processing"])
+app.include_router(resources.router, prefix="/api/v1/courses", tags=["Resource Management"])
+app.include_router(document_processing_router, prefix="/api/v1/courses", tags=["Document Processing"])
 
 @app.get("/health")
 async def health_check():
