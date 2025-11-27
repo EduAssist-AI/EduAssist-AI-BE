@@ -20,6 +20,7 @@ class ModuleListResponse(BaseModel):
 class ModuleChatRequest(BaseModel):
     llm_prompt_template: str
     message: str
+    resource_ids: Optional[List[str]] = Field(default_factory=list)  # Optional list of resource IDs to use for RAG
 
 
 class ModuleChatResponse(BaseModel):
