@@ -466,8 +466,31 @@ async def get_summary(
                 detail="Summary not found."
             )
 
-        # Verify user has access to the course (same access check as creation)
-        course_id = str(summary["course_id"])
+        # Get course_id from summary, but handle cases where it might be missing
+        course_id = summary.get("course_id")
+
+        # Try to get course_id from video or resource if not directly available
+        if not course_id:
+            # If summary has video_id, get course_id from video
+            if summary.get("video_id"):
+                video = await db["videos"].find_one({"_id": summary["video_id"]})
+                if video and video.get("course_id"):
+                    course_id = video["course_id"]
+
+            # If summary has resource_id, get course_id from resource
+            elif summary.get("resource_id"):
+                resource = await db["resources"].find_one({"_id": summary["resource_id"]})
+                if resource and resource.get("course_id"):
+                    course_id = resource["course_id"]
+
+        # If we still don't have course_id, we can't verify access
+        if not course_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Associated course not found for summary."
+            )
+
+        # Verify user has access to the course
         course = await db["course_rooms"].find_one({"_id": ObjectId(course_id)})
         if not course:
             raise HTTPException(
@@ -492,7 +515,7 @@ async def get_summary(
             videoId=str(summary.get("video_id")) if summary.get("video_id") else None,
             resourceId=str(summary.get("resource_id")) if summary.get("resource_id") else None,
             moduleId=str(summary.get("module_id")) if summary.get("module_id") else None,
-            courseId=str(summary["course_id"]),
+            courseId=str(course_id) if course_id else str(summary.get("course_id")) if summary.get("course_id") else None,
             lengthType=summary["length_type"],
             content=summary["content"],
             wordCount=summary["word_count"],
@@ -528,8 +551,31 @@ async def update_summary(
                 detail="Summary not found."
             )
 
+        # Get course_id from summary, but handle cases where it might be missing
+        course_id = existing_summary.get("course_id")
+
+        # Try to get course_id from video or resource if not directly available
+        if not course_id:
+            # If summary has video_id, get course_id from video
+            if existing_summary.get("video_id"):
+                video = await db["videos"].find_one({"_id": existing_summary["video_id"]})
+                if video and video.get("course_id"):
+                    course_id = video["course_id"]
+
+            # If summary has resource_id, get course_id from resource
+            elif existing_summary.get("resource_id"):
+                resource = await db["resources"].find_one({"_id": existing_summary["resource_id"]})
+                if resource and resource.get("course_id"):
+                    course_id = resource["course_id"]
+
+        # If we still don't have course_id, we can't verify access
+        if not course_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Associated course not found for summary."
+            )
+
         # Verify user is course owner (faculty) to update summaries
-        course_id = str(existing_summary["course_id"])
         course = await db["course_rooms"].find_one({"_id": ObjectId(course_id)})
         if not course or str(course["created_by"]) != current_user["id"]:
             raise HTTPException(
@@ -581,7 +627,7 @@ async def update_summary(
             videoId=str(updated_summary.get("video_id")) if updated_summary.get("video_id") else None,
             resourceId=str(updated_summary.get("resource_id")) if updated_summary.get("resource_id") else None,
             moduleId=str(updated_summary.get("module_id")) if updated_summary.get("module_id") else None,
-            courseId=str(updated_summary["course_id"]),
+            courseId=str(course_id),
             lengthType=updated_summary["length_type"],
             content=updated_summary["content"],
             wordCount=updated_summary["word_count"],
@@ -616,8 +662,32 @@ async def delete_summary(
                 detail="Summary not found."
             )
 
+        # Get course_id from summary, but handle cases where it might be missing
+        course_id = summary.get("course_id")
+
+        # Try to get course_id from video or resource if not directly available
+        if not course_id:
+            # If summary has video_id, get course_id from video
+            if summary.get("video_id"):
+                video = await db["videos"].find_one({"_id": summary["video_id"]})
+                if video and video.get("course_id"):
+                    course_id = video["course_id"]
+
+            # If summary has resource_id, get course_id from resource
+            elif summary.get("resource_id"):
+                resource = await db["resources"].find_one({"_id": summary["resource_id"]})
+                if resource and resource.get("course_id"):
+                    course_id = resource["course_id"]
+
+        # If we still don't have course_id, we can't verify access
+        if not course_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Associated course not found for summary."
+            )
+
         # Verify user is course owner (faculty) to delete summaries
-        course = await db["course_rooms"].find_one({"_id": summary["course_id"]})
+        course = await db["course_rooms"].find_one({"_id": course_id})
         if not course or str(course["created_by"]) != current_user["id"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
