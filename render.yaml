@@ -1,0 +1,38 @@
+# Render Deployment Configuration
+# Deploy at: https://render.com
+
+services:
+  - type: web
+    name: eduassist-ai-backend
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: MONGODB_URL
+        sync: false
+      - key: DB_NAME
+        value: eduassist_db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GOOGLE_DRIVE_CREDENTIALS_PATH
+        value: credentials.json
+      - key: OLLAMA_HOST
+        value: http://localhost:11434
+      - key: OLLAMA_MODEL
+        value: llama2
+    disk:
+      name: chroma-data
+      mountPath: /app/chroma_db
+      sizeGB: 1
+    healthCheckPath: /health
+
+# Note: For LLM inference, consider using an external API
+# Render's free tier doesn't support running Ollama efficiently
+# Options:
+# 1. Use OpenAI API (add OPENAI_API_KEY to env vars)
+# 2. Use HuggingFace Inference API
+# 3. Deploy Ollama on a separate GPU-enabled service

@@ -27,7 +27,14 @@ app = FastAPI(lifespan=lifespan)
 # CORS (for frontend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # update in production
+    allow_origins=[
+        "https://eduassist-ai.github.io",
+        "https://eduassist-ai.github.io/EduAssist-AI-FE",
+        "https://pritesh24gurjar.github.io",
+        "https://pritesh24gurjar.github.io/EduAssist-AI-FE/",
+        "http://localhost:5173",  # Vite dev server
+        "http://localhost:3000",  # Common dev port
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
