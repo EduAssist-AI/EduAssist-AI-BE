@@ -1,8 +1,8 @@
 """
 API endpoints for EduAssist-AI video processing with full CRUD operations
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, status
-from typing import Optional
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, status, Body
+from typing import Optional, List
 import os
 import uuid
 from pathlib import Path
@@ -296,7 +296,7 @@ async def get_video_transcript(video_id: str, current_user: UserOut = Depends(ge
 
 
 @router.put("/videos/{video_id}/transcript")
-async def update_video_transcript(video_id: str, segments: list, current_user: UserOut = Depends(get_current_user)):
+async def update_video_transcript(video_id: str, segments: List[dict] = Body(...), current_user: UserOut = Depends(get_current_user)):
     """
     Update video transcript segments
     """
@@ -328,7 +328,7 @@ async def update_video_transcript(video_id: str, segments: list, current_user: U
         transcript_doc = {
             "video_id": ObjectId(video_id),
             "segments": segments,
-            "updated_at": datetime.datetime.utcnow()
+            "updated_at": datetime.utcnow()
         }
         
         # Check if transcript already exists

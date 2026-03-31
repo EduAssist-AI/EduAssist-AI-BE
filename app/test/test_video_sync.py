@@ -38,13 +38,17 @@ def client():
 
 @pytest.fixture
 def mock_db():
-    with patch('app.routes.videos.db') as mock_db_instance:
+    with patch('app.routes.videos.db') as mock_db_instance, \
+         patch('app.tasks.update_video_status') as mock_update_video_status:
+        # Mock the update_video_status function to be async and return nothing (None)
+        mock_update_video_status.return_value = None
+
         # Mock collections
         mock_video_collection = AsyncMock()
         mock_course_collection = AsyncMock()
         mock_enrollments_collection = AsyncMock()
         mock_transcript_collection = AsyncMock()
-        
+
         # Setup course collection for permission checks
         mock_course_collection.find_one.return_value = {
             "_id": ObjectId(test_course_id),
@@ -54,15 +58,15 @@ def mock_db():
             "created_at": datetime.utcnow(),
             "status": "ACTIVE"
         }
-        
+
         # Setup video collection
         mock_video_collection.insert_one.return_value = type('obj', (object,), {'inserted_id': ObjectId(test_video_id)})()
-        
+
         # Setup transcript collection
         transcript_insert_result = AsyncMock()
         transcript_insert_result.inserted_id = ObjectId()
         mock_transcript_collection.insert_one.return_value = transcript_insert_result
-        
+
         # Setup enrollment collection (for permission checks)
         mock_enrollments_collection.find_one.return_value = {
             "user_id": ObjectId(test_user_id),
@@ -70,7 +74,7 @@ def mock_db():
             "role": test_role,
             "status": "ACTIVE"
         }
-        
+
         # Mock the collections in the db object
         mock_db_instance.__getitem__.side_effect = lambda x: {
             "videos": mock_video_collection,
@@ -78,7 +82,7 @@ def mock_db():
             "enrollments": mock_enrollments_collection,
             "transcripts": mock_transcript_collection
         }[x]
-        
+
         yield mock_db_instance
 
 @pytest.mark.asyncio

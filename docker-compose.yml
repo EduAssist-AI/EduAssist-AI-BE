@@ -1,0 +1,52 @@
+# Docker Compose for local development and testing
+# Run with: docker-compose up --build
+
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DB_NAME=eduassist_db
+      - JWT_SECRET=your-secret-key-change-in-production
+      - GOOGLE_DRIVE_CREDENTIALS_PATH=/app/credentials.json
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./uploads:/app/uploads
+      - ./credentials.json:/app/credentials.json:ro
+    depends_on:
+      - mongodb
+      - ollama
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Uncomment below if you have NVIDIA GPU
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  mongodb_data:
+  ollama_data:

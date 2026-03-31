@@ -27,8 +27,8 @@ def client():
     # Mock the authentication to return a user using consistent credentials
     # NOTE: Quiz routes expect "_id" key, not "id"
     app.dependency_overrides[get_current_user] = lambda: {
-        "_id": test_user_id, 
-        "username": test_username, 
+        "_id": test_user_id,
+        "username": test_username,
         "email": test_email,
         "role": test_role
     }
@@ -45,7 +45,7 @@ def mock_db():
         mock_enrollments_collection = AsyncMock()
         mock_quizzes_collection = AsyncMock()
         mock_quiz_attempts_collection = AsyncMock()
-        
+
         # Setup videos collection
         mock_videos_collection.find_one.return_value = {
             "_id": ObjectId(test_video_id),
@@ -59,7 +59,7 @@ def mock_db():
             "has_summary": False,
             "has_quiz": True
         }
-        
+
         # Setup courses collection
         mock_courses_collection.find_one.return_value = {
             "_id": ObjectId(),
@@ -69,7 +69,7 @@ def mock_db():
             "created_at": datetime.utcnow(),
             "status": "ACTIVE"
         }
-        
+
         # Setup enrollments collection
         mock_enrollments_collection.find_one.return_value = {
             "user_id": ObjectId(test_user_id),
@@ -77,7 +77,7 @@ def mock_db():
             "role": test_role,
             "status": "ACTIVE"
         }
-        
+
         # Setup quizzes collection
         mock_quizzes_collection.find_one.return_value = {
             "_id": ObjectId(test_quiz_id),
@@ -94,10 +94,23 @@ def mock_db():
             "is_published": True,
             "version": 1
         }
-        
-        # Mock find for quizzes (for get_quiz_list)
-        mock_quizzes_cursor = AsyncMock()
-        
+
+        # Mock find for quizzes (for get_quiz_list) - creating a proper async cursor mock
+        class MockAsyncCursor:
+            def __init__(self, items):
+                self.items = items
+                self.index = 0
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self.index >= len(self.items):
+                    raise StopAsyncIteration
+                item = self.items[self.index]
+                self.index += 1
+                return item
+
         # Create quiz items
         quiz_items = [{
             "_id": ObjectId(test_quiz_id),
@@ -105,7 +118,7 @@ def mock_db():
             "title": "Test Quiz",
             "questions": [
                 {
-                    "question": "What is the capital of France?", 
+                    "question": "What is the capital of France?",
                     "options": ["London", "Berlin", "Paris", "Madrid"],
                     "correctAnswer": "Paris",
                     "explanation": "Paris is the capital of France."
@@ -114,26 +127,18 @@ def mock_db():
             "is_published": True,
             "version": 1
         }]
-        
-        # Create an async generator function
-        async def async_generator():
-            for item in quiz_items:
-                yield item
-        
-        # Set the __aiter__ method on the mock cursor to return our async generator
-        mock_quizzes_cursor.__aiter__ = async_generator
-        
-        # Create a mock find method that returns the cursor when awaited
-        async def mock_find_quizzes(*args, **kwargs):
-            return mock_quizzes_cursor
-        
+
+        # Create a mock find method that returns an instance of MockAsyncCursor directly
+        def mock_find_quizzes(*args, **kwargs):
+            return MockAsyncCursor(quiz_items)
+
         mock_quizzes_collection.find = mock_find_quizzes
-        
+
         # Setup quiz attempts collection
         insert_result = AsyncMock()
         insert_result.inserted_id = ObjectId(test_attempt_id)
         mock_quiz_attempts_collection.insert_one.return_value = insert_result
-        
+
         # Mock the collections in the db object
         mock_db_instance.__getitem__.side_effect = lambda x: {
             "videos": mock_videos_collection,
@@ -142,14 +147,14 @@ def mock_db():
             "quizzes": mock_quizzes_collection,
             "quiz_attempts": mock_quiz_attempts_collection
         }[x]
-        
+
         yield mock_db_instance
 
 @pytest.mark.asyncio
 async def test_get_quiz_list_success(client, mock_db):
     """Test successful retrieval of quiz list for a video"""
     response = client.get(f"/api/v1/videos/{test_video_id}/quizzes")
-    
+
     assert response.status_code == 200
     assert "quizzes" in response.json()
     assert isinstance(response.json()["quizzes"], list)
@@ -166,9 +171,9 @@ async def test_submit_quiz_attempt_success(client, mock_db):
         ],
         "timeSpentSeconds": 120
     }
-    
+
     response = client.post(f"/api/v1/quizzes/{test_quiz_id}/attempts", json=quiz_answers)
-    
+
     assert response.status_code == 201
     assert "attemptId" in response.json()
     assert "score" in response.json()
